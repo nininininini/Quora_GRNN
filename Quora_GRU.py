@@ -22,11 +22,16 @@ from sklearn.cluster import MiniBatchKMeans
 reload(sys)
 sys.setdefaultencoding('utf-8')
 
+#Path of the word vectors, here I use the 50k Global Vectors for Word Representation (Pennington et al., Stanford NLP)
+#More features could make the embedding more accurate but will need the network to increase it's capacity -> not actually possible due to the memory lack.
+# To tackle this issue, further work will convert the preprocessed dataset to h5py chunks and then feed it to the batch iterator. 
+
 Dict_path = '/melvin/Data/Quora/glove.6B.50d.txt'
 Data_path = '/melvin/Data/Quora/'
 Test_Data_path = '/melvin/Data/Quora/'
 
 Dataset = pd.read_csv(os.path.join(Data_path, "train.csv"))
+#Reduce the length of the Dataset to fit in memory:
 Dataset = Dataset[0:40000]
 Test_set = pd.read_csv(os.path.join(Test_Data_path, "test.csv"))
 
@@ -141,7 +146,8 @@ def Preprocess_Data(Data, Training_set=True):
         return X_train, X_val, y_train, y_val
     else:
         return X
-
+    
+#Not computationally efficient for large Dataset (too large time to load mini-batch) 
 def batch_gen(X, y, N, Training=True):
     while True:
         if Training == True:
@@ -158,10 +164,10 @@ def batch_gen(X, y, N, Training=True):
         else:
             yield X_batch.astype('float32'), mask_batch.astype('float32')
       
-def GRU(MAX_LENGTH, N_HIDDEN1):
-    print("Building Gated Reccurent Network")
-    l_in = lasagne.layers.InputLayer(shape=(None, None, 1))
-    l_mask = lasagne.layers.InputLayer(shape=(None, MAX_LENGTH))
+def GRU(MAX_LENGTH, N_HIDDEN1, BATCH):
+    print("Building Gated Recurrent Network")
+    l_in = lasagne.layers.InputLayer(shape=(BATCH, MAX_LENGTH, 1))
+    l_mask = lasagne.layers.InputLayer(shape=(BATCH, MAX_LENGTH))
     
     gate_parameters = lasagne.layers.recurrent.Gate(W_in=lasagne.init.Orthogonal(), 
                                                     W_hid=lasagne.init.Orthogonal(),
@@ -191,7 +197,7 @@ def Train_model(BATCH_SIZE, number_of_epochs, lr):
     
     X_train, X_val, y_train, y_val = Preprocess_Data(Dataset, Training_set=True)  
         
-    l_in, l_mask, l_out = GRU(MAX_LENGTH=max_len, N_HIDDEN1=20)
+    l_in, l_mask, l_out = GRU(MAX_LENGTH=max_len, N_HIDDEN1=20, BATCH_SIZE)
     
     y_sym = T.matrix()
 
@@ -204,7 +210,7 @@ def Train_model(BATCH_SIZE, number_of_epochs, lr):
 
     params = lasagne.layers.get_all_params(l_out)
     grad = T.grad(loss, params)
-    updates = lasagne.updates.adam(grad, params, learning_rate=lr)
+    updates = lasagne.updates.adamax(grad, params, learning_rate=lr)
 
     f_train = theano.function([l_in.input_var, y_sym, l_mask.input_var], [loss, acc], updates=updates)
     f_val = theano.function([l_in.input_var, y_sym, l_mask.input_var], [loss, acc])
@@ -259,10 +265,10 @@ def Train_model(BATCH_SIZE, number_of_epochs, lr):
                                       'label': predictions})
     
     Submission.to_csv(os.path.join(Data_path,r'Submission.csv'), header=True, index=False)        
-    print("CSV submission file generated on working directory")
+    print("CSV submission file generated in Data_path")
 
  
     
 if __name__ == "__main__":
-    #Don't forget to change paths before AWS script !!!!!!
+    #Don't forget to change paths n_epochs before running on AWS !!!!!!
     Train_model(BATCH_SIZE=64, number_of_epochs=30, lr=0.002)
